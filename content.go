@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +24,13 @@ import (
 
 //go:embed embed
 var embedded embed.FS
+
+func init() {
+	_ = fs.WalkDir(embedded, "embed", func(path string, d fs.DirEntry, err error) error {
+		log.Printf("found embedded file: %s", path)
+		return nil
+	})
+}
 
 type BlogPost struct {
 	Title   string
