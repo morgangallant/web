@@ -8,9 +8,7 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,13 +22,6 @@ import (
 
 //go:embed embed
 var embedded embed.FS
-
-func init() {
-	_ = fs.WalkDir(embedded, "embed", func(path string, d fs.DirEntry, err error) error {
-		log.Printf("found embedded file: %s", path)
-		return nil
-	})
-}
 
 type BlogPost struct {
 	Title   string
@@ -108,7 +99,13 @@ func parseBlogPost(fp string, ts time.Time) (BlogPost, error) {
 	var bp BlogPost
 	bp.Date = ts
 
-	bcontent, err := os.ReadFile(fp)
+	f, err := embedded.Open(fp)
+	if err != nil {
+		return bp, err
+	}
+	defer f.Close()
+
+	bcontent, err := io.ReadAll(f)
 	if err != nil {
 		return bp, err
 	}
