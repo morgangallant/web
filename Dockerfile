@@ -4,6 +4,7 @@ ADD go.mod .
 ADD go.sum .
 RUN go mod download
 ADD . .
+RUN ls -lah
 RUN go build -o server .
 
 FROM golang:bullseye
