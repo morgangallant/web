@@ -39,6 +39,17 @@ var jobs = []job{
 			},
 		),
 	},
+	// {
+	// 	name: "testing",
+	// 	when: "@every 5m",
+	// 	work: func(jc *jobContext) error {
+	// 		return notify(
+	// 			context.Background(),
+	// 			jc,
+	// 			"shen is cute",
+	// 		)
+	// 	},
+	// },
 }
 
 func urlResponsivenessCheck(url string, cb func(*jobContext, int, string) error) workFunc {
