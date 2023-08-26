@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -168,6 +169,7 @@ func healthCheckHandler() http.HandlerFunc {
 
 func telegramHandler(agent *agent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("got telegram message: %v", r)
 		req := new(telegramMessage)
 		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
