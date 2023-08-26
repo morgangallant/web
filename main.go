@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"os"
 	"os/signal"
@@ -67,37 +66,44 @@ func run(ctx context.Context, shutdown context.CancelFunc, logger *zap.Logger) e
 	}
 	defer db.Close()
 
-	tmpls, err := fs.Sub(templates, "templates")
-	if err != nil {
-		return err
+	ag := &agent{
+		logger: logger,
+		db:     db,
 	}
 
-	tset, err := newTemplateSet(tmpls)
+	tset, err := newTemplateSet("embed/templates", embedded)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load templates: %w", err)
 	}
 
-	const blogPrefix = "/blog"
+	const blogPrefix = "/blog/"
 
 	blogPostHandler, posts, err := blogHandler(logger, tset, blogPrefix)
 	if err != nil {
 		return err
 	}
 
+	staticHandler, err := staticHandler()
+	if err != nil {
+		return err
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthCheckHandler())
+	mux.Handle("/webhook/telegram", telegramHandler(ag))
 	mux.HandleFunc(blogPrefix, blogPostHandler)
+	mux.HandleFunc("/feed.xml", rssFeedHandler(posts))
 	mux.HandleFunc("/", tset.handlerWithFallback(
 		func(r *http.Request) (any, error) {
 			return struct {
 				commonTemplateData
-				RecentPosts []blogPost
+				RecentPosts []BlogPost
 			}{
 				commonTemplateData: loadCommonTemplateData(r),
-				RecentPosts:        posts[:min(3, len(posts))],
+				RecentPosts:        posts[:min(len(posts), 3)],
 			}, nil
 		},
-		staticHandler(),
+		staticHandler,
 	))
 
 	port, ok := os.LookupEnv("PORT")
@@ -134,7 +140,12 @@ func run(ctx context.Context, shutdown context.CancelFunc, logger *zap.Logger) e
 
 	logger.Info("started http server", zap.String("port", port))
 
-	crons, njobs := jobsCronServer(logger)
+	jc := &jobContext{
+		logger: logger,
+		agent:  ag,
+	}
+
+	crons, njobs := jobsCronServer(jc)
 	crons.Start()
 	defer crons.Stop()
 
@@ -155,28 +166,15 @@ func healthCheckHandler() http.HandlerFunc {
 	}
 }
 
-type telegramMessage struct {
-	ID      int64 `json:"update_id"`
-	Message struct {
-		ID   int64  `json:"message_id"`
-		Text string `json:"text"`
-		Chat struct {
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
-		} `json:"chat"`
-		User *struct {
-			ID        int64   `json:"id"`
-			FirstName string  `json:"first_name"`
-			Username  *string `json:"username"`
-		} `json:"from"`
-	} `json:"message"`
-}
-
 func telegramHandler(agent *agent) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := new(telegramMessage)
 		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if err := agent.handleIncomingTelegram(r.Context(), req); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}

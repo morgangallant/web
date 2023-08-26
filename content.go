@@ -10,20 +10,25 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/gorilla/feeds"
+	"github.com/microcosm-cc/bluemonday"
+	"github.com/russross/blackfriday/v2"
 	"go.uber.org/zap"
 )
 
-//go:embed writing
-var writing embed.FS
+//go:embed embed
+var embedded embed.FS
 
-type blogPost struct {
-	title   string
-	date    time.Time
-	content string
+type BlogPost struct {
+	Title   string
+	Date    time.Time
+	Slug    string
+	Content template.HTML
 }
 
 const (
@@ -31,12 +36,19 @@ const (
 	postSuffix = ".md"
 )
 
-func loadBlogPosts(logger *zap.Logger) ([]blogPost, error) {
-	var posts []blogPost
+func loadBlogPosts(logger *zap.Logger) ([]BlogPost, error) {
+	var posts []BlogPost
+
+	const prefix = "embed/writing"
+
+	sub, err := fs.Sub(embedded, prefix)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := fs.WalkDir(
-		writing,
-		"writing",
+		sub,
+		".",
 		func(fp string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -59,7 +71,7 @@ func loadBlogPosts(logger *zap.Logger) ([]blogPost, error) {
 				return nil
 			}
 
-			bp, err := parseBlogPost(fp, ts)
+			bp, err := parseBlogPost(filepath.Join(prefix, fp), ts)
 			if err != nil {
 				logger.Warn(
 					"failed to parse blog post, skipping",
@@ -78,15 +90,15 @@ func loadBlogPosts(logger *zap.Logger) ([]blogPost, error) {
 
 	// Sort posts from newest to oldest
 	sort.Slice(posts, func(i, j int) bool {
-		return posts[i].date.After(posts[j].date)
+		return posts[i].Date.After(posts[j].Date)
 	})
 
 	return posts, nil
 }
 
-func parseBlogPost(fp string, ts time.Time) (blogPost, error) {
-	var bp blogPost
-	bp.date = ts
+func parseBlogPost(fp string, ts time.Time) (BlogPost, error) {
+	var bp BlogPost
+	bp.Date = ts
 
 	bcontent, err := os.ReadFile(fp)
 	if err != nil {
@@ -104,8 +116,13 @@ func parseBlogPost(fp string, ts time.Time) (blogPost, error) {
 		return bp, errors.New("titles should end with a newline character")
 	}
 
-	bp.title = title
-	bp.content = strings.Trim(remaining, "\n\t ")
+	bp.Title = title
+	bp.Slug = "/blog/" + ts.Format(timeFormat)
+
+	unsafe := blackfriday.Run([]byte(strings.Trim(remaining, "\n\t ")))
+	html := bluemonday.UGCPolicy().SanitizeBytes(unsafe)
+
+	bp.Content = template.HTML(html)
 
 	return bp, nil
 }
@@ -114,7 +131,7 @@ func blogHandler(
 	logger *zap.Logger,
 	tset *templateSet,
 	prefix string,
-) (http.HandlerFunc, []blogPost, error) {
+) (http.HandlerFunc, []BlogPost, error) {
 	posts, err := loadBlogPosts(logger)
 	if err != nil {
 		return nil, nil, err
@@ -122,7 +139,7 @@ func blogHandler(
 
 	index := make(map[string]int, len(posts))
 	for i, p := range posts {
-		dfmt := p.date.Format(timeFormat)
+		dfmt := p.Date.Format(timeFormat)
 		if _, ok := index[dfmt]; ok {
 			return nil, nil, fmt.Errorf(
 				"overlapping blog post %s%s, shouldn't happen",
@@ -149,7 +166,7 @@ func blogHandler(
 
 			var data struct {
 				commonTemplateData
-				Posts []blogPost
+				Posts []BlogPost
 			}
 			data.commonTemplateData = loadCommonTemplateData(r)
 			data.Posts = posts
@@ -175,7 +192,7 @@ func blogHandler(
 
 		var data struct {
 			commonTemplateData
-			Post blogPost
+			Post BlogPost
 		}
 		data.commonTemplateData = loadCommonTemplateData(r)
 		data.Post = posts[postIdx]
@@ -186,14 +203,43 @@ func blogHandler(
 	}, posts, nil
 }
 
-//go:embed static
-var static embed.FS
+func rssFeedHandler(posts []BlogPost) http.HandlerFunc {
+	feed := &feeds.Feed{
+		Title:       "morgangallant.com blog",
+		Link:        &feeds.Link{Href: "https://morgangallant.com/blog"},
+		Description: "Rambling on the internet...",
+		Author:      &feeds.Author{Name: "Morgan Gallant", Email: "morgan@morgangallant.com"},
+		Created:     time.Now(),
+	}
+	policy := bluemonday.StripTagsPolicy()
+	for _, p := range posts {
+		feed.Items = append(feed.Items, &feeds.Item{
+			Title:       p.Title,
+			Link:        &feeds.Link{Href: "https://morgangallant.com" + p.Slug},
+			Description: policy.Sanitize(string(p.Content[:min(len(p.Content), 100)])) + "...",
+			Created:     p.Date,
+		})
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		rss, err := feed.ToRss()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.Write([]byte(rss))
+	}
+}
 
-func staticHandler() http.HandlerFunc {
-	fs := http.FileServer(http.FS(static))
+func staticHandler() (http.HandlerFunc, error) {
+	sub, err := fs.Sub(embedded, "embed/static")
+	if err != nil {
+		return nil, err
+	}
+	fs := http.FileServer(http.FS(sub))
 	return func(w http.ResponseWriter, r *http.Request) {
 		fs.ServeHTTP(w, r)
-	}
+	}, nil
 }
 
 type templateSet struct {
@@ -205,8 +251,13 @@ const (
 	baseTmpl = "base"
 )
 
-func newTemplateSet(fsys fs.FS) (*templateSet, error) {
-	files, err := fs.ReadDir(fsys, ".")
+func newTemplateSet(prefix string, fsys fs.FS) (*templateSet, error) {
+	sub, err := fs.Sub(fsys, prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := fs.ReadDir(sub, ".")
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +278,14 @@ func newTemplateSet(fsys fs.FS) (*templateSet, error) {
 			continue
 		}
 		id := strings.TrimSuffix(name, tmplExt)
-		tmpl, err := template.New(id).ParseFS(fsys, (*base).Name(), name)
+		files := []string{
+			filepath.Join(prefix, name),
+			filepath.Join(prefix, (*base).Name()),
+		}
+		tmpl, err := template.New(id).ParseFS(
+			fsys,
+			files...,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -276,9 +334,6 @@ func (ts *templateSet) handlerWithFallback(
 		}
 	}
 }
-
-// go:embed templates
-var templates embed.FS
 
 type commonTemplateData struct {
 	ProcessingTime string

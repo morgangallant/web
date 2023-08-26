@@ -15,10 +15,13 @@
             margin: 0 auto;
             padding: 1em;
         }
+        section, header {
+            margin-bottom: 1em;
+        }
     </style>
 </head>
 <body>
-    {{template "content"}}
+    {{template "content" .}}
     <footer>
         <p>Current year: {{.CurrentYear}}</p>
         <p>Time spent processing your request: {{.ProcessingTime}}</p>

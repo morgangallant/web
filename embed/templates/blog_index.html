@@ -1,0 +1,15 @@
+{{define "content"}}
+<header>
+    <p><a href="/">&larr; Back to homepage</a></p>
+    <br />
+    <h3>Blog Index</h3>
+    <p>Also available via <a href="/feed.xml">RSS</a>.</p>
+</header>
+<section>
+    <ul>
+        {{range .Posts}}
+            <li><a href="{{.Slug}}">{{.Title}}</a> ({{.Date.Format "Jan 02 2006"}})</li>
+        {{end}}
+    </ul>
+</section>
+{{end}}
