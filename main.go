@@ -18,10 +18,6 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-var requiredVars = []string{
-	"TELEGRAM_KEY",
-}
-
 func main() {
 	var logger *zap.Logger
 	if v, ok := os.LookupEnv("RAILWAY_ENVIRONMENT"); ok && v == "production" {
@@ -39,12 +35,6 @@ func main() {
 			zap.String("file", envf),
 		)
 		_ = godotenv.Load(envf)
-	}
-
-	for _, reqv := range requiredVars {
-		if _, ok := os.LookupEnv(reqv); !ok {
-			logger.Fatal("missing required environment variable", zap.String("variable", reqv))
-		}
 	}
 
 	rctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)

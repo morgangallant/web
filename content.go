@@ -342,7 +342,6 @@ func (ts *templateSet) handlerWithFallback(
 
 type commonTemplateData struct {
 	ProcessingTime string
-	CurrentYear    int
 }
 
 func loadCommonTemplateData(r *http.Request) (ctd commonTemplateData) {
@@ -352,8 +351,6 @@ func loadCommonTemplateData(r *http.Request) (ctd commonTemplateData) {
 	}
 
 	now := time.Now()
-
-	ctd.CurrentYear = now.Year()
 
 	// Note: Not entirely accurate, doesn't take into account time taken
 	// to render the response (i.e. the html/template portion). Should

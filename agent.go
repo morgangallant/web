@@ -52,7 +52,11 @@ func (a *agent) setUserTelegramChatId(user string, chatId int64) error {
 }
 
 func (a *agent) sendTelegramMessage(ctx context.Context, chatId int64, msg string) error {
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", os.Getenv("TELEGRAM_KEY"))
+	tkey, ok := os.LookupEnv("TELEGRAM_KEY")
+	if !ok {
+		return errors.New("missing TELEGRAM_KEY environment variable")
+	}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", tkey)
 	body, err := json.Marshal(map[string]any{
 		"chat_id": chatId,
 		"text":    msg,

@@ -6,24 +6,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Morgan's Website</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            max-width: 960px;
-            margin: 0 auto;
-            padding: 1em;
-        }
-        section, header {
-            margin-bottom: 1em;
-        }
+	body {
+	    padding: 0 2rem;
+	    margin: 0;
+	    max-width: 34rem;
+	    margin: 64px auto;
+	}
+	section {
+	    margin: 32px 0;
+	}
     </style>
 </head>
 <body>
     {{template "content" .}}
     <footer>
-        <p>Current year: {{.CurrentYear}}</p>
+	<hr />
         <p>Time spent processing your request: {{.ProcessingTime}}</p>
         <p>Source code for this website <a href="https://github.com/morgangallant/web">is on github</a></p>
     </footer>
