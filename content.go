@@ -236,12 +236,25 @@ func rssFeedHandler(posts []BlogPost) http.HandlerFunc {
 	}
 }
 
+type htmlStrippedFs struct {
+	inner http.FileSystem
+}
+
+func (hsfs *htmlStrippedFs) Open(name string) (http.File, error) {
+	if !strings.HasSuffix(name, ".html") {
+		if f, err := hsfs.Open(name + ".html"); err == nil {
+			return f, nil
+		}
+	}
+	return hsfs.inner.Open(name)
+}
+
 func staticHandler() (http.HandlerFunc, error) {
 	sub, err := fs.Sub(embedded, "embed/static")
 	if err != nil {
 		return nil, err
 	}
-	fs := http.FileServer(http.FS(sub))
+	fs := http.FileServer(&htmlStrippedFs{http.FS(sub)})
 	return func(w http.ResponseWriter, r *http.Request) {
 		fs.ServeHTTP(w, r)
 	}, nil
